@@ -9,8 +9,8 @@ const THRESHOLD = 5;
 /** Every movable element, by side, in the built-in order. A key missing from a saved order goes back to its
  *  built-in neighbour, so elements added in later versions turn up where they belong. */
 const SIDES = [
-  ["media", "claude", "codex", "docker"],
-  ["usage", "tray", "status", "clock"],
+  ["desktops", "media", "claude", "codex", "docker"],
+  ["custom", "awake", "usage", "tray", "status", "clock"],
 ];
 
 export type Hooks = {

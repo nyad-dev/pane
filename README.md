@@ -70,6 +70,8 @@ Pane puts a bar on **every monitor**, each showing that monitor's windows, and g
 
 **Double-click the empty bar** to open a terminal, File Explorer, Task Manager, the desktop or an app of your choice (settings). The right-click menu has **Open terminal** and **Task Manager**.
 
+**Extras**, each off until you switch it on in the settings: a **keep-awake** button (the PC and screen don't sleep while it is lit; every start of Pane begins with normal sleep), **virtual desktop** dots (click one to switch, or scroll), and **your own widget**: any command, run every few seconds, its first line shown on the bar. Scrolling on the volume icon changes the volume and on an app steps through its windows (on by default, can be switched off).
+
 ## Turning it off
 
 - **Quit:** right-click the bar → *Quit Pane*. The taskbar returns at once.

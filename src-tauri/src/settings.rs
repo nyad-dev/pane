@@ -66,6 +66,15 @@ pub struct Settings {
     /// What a double-click on an empty part of the bar does: "none", "terminal", "explorer", "taskmgr",
     /// "desktop", or any other text is run as a program (a path or a command line, main.rs `void_action`).
     pub void_action: String,
+    /// Scroll on the volume icon changes the volume; on an app icon it steps through that app's windows.
+    pub wheel: bool,
+    /// A keep-awake button (cup) on the bar (extras.rs).
+    pub show_awake: bool,
+    /// Virtual desktop dots on the bar (extras.rs).
+    pub show_desktops: bool,
+    /// The user's own widget: a command run every `custom_seconds`, its first line shown on the bar. Empty: off.
+    pub custom_command: String,
+    pub custom_seconds: u32,
     /// Auto-hide: how long after the mouse left the bar it slides away (ms).
     pub hide_delay_ms: u32,
     /// Auto-hide: how long the slide takes (ms).
@@ -96,6 +105,8 @@ impl Size {
 const GLASS_MAX: f64 = 100.0;
 /// A program path or command line fits; longer is a mistake.
 const VOID_MAX: usize = 400;
+/// How often the user's command runs: at most every 2 s (it starts a process), at least every hour.
+const CUSTOM_SECONDS: (f64, f64) = (2.0, 3600.0);
 const HIDE_DELAY: (f64, f64) = (100.0, 3000.0);
 const SLIDE: (f64, f64) = (0.0, 600.0);
 
@@ -103,7 +114,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             autohide: false,
-            fill: false,
+            fill: true, // default since 2026-11-14 (the user: "Fill the screen edge should be default")
             adaptive_color: false,
             blend: false,
             all_monitors: false,
@@ -131,6 +142,11 @@ impl Default for Settings {
             opacity: 50,
             win_key: true,
             void_action: "none".into(),
+            wheel: true,
+            show_awake: false,
+            show_desktops: false,
+            custom_command: String::new(),
+            custom_seconds: 30,
             hide_delay_ms: 700,
             // With the overshoot and settle (main.rs `slide`); 120 ms was a plain slide.
             slide_ms: 260,
@@ -169,6 +185,9 @@ impl Settings {
             "autostart_set" => &mut self.autostart_set,
             "admin_warned" => &mut self.admin_warned,
             "win_key" => &mut self.win_key,
+            "wheel" => &mut self.wheel,
+            "show_awake" => &mut self.show_awake,
+            "show_desktops" => &mut self.show_desktops,
             _ => return None,
         })
     }
@@ -184,6 +203,8 @@ impl Settings {
             "glass" => self.glass = num((0.0, GLASS_MAX))? as u8,
             "opacity" => self.opacity = num((0.0, GLASS_MAX))? as u8,
             "void_action" => self.void_action = value.as_str()?.trim().chars().take(VOID_MAX).collect(),
+            "custom_command" => self.custom_command = value.as_str()?.trim().chars().take(VOID_MAX).collect(),
+            "custom_seconds" => self.custom_seconds = num(CUSTOM_SECONDS)? as u32,
             "hide_delay_ms" => self.hide_delay_ms = num(HIDE_DELAY)? as u32,
             "slide_ms" => self.slide_ms = num(SLIDE)? as u32,
             "size" => self.size = Size::deserialize(value).ok()?,
@@ -197,6 +218,8 @@ impl Settings {
         self.glass = self.glass.min(GLASS_MAX as u8);
         self.opacity = self.opacity.min(GLASS_MAX as u8);
         self.void_action = self.void_action.chars().take(VOID_MAX).collect();
+        self.custom_command = self.custom_command.chars().take(VOID_MAX).collect();
+        self.custom_seconds = (self.custom_seconds as f64).clamp(CUSTOM_SECONDS.0, CUSTOM_SECONDS.1) as u32;
         self.hide_delay_ms = (self.hide_delay_ms as f64).clamp(HIDE_DELAY.0, HIDE_DELAY.1) as u32;
         self.slide_ms = (self.slide_ms as f64).clamp(SLIDE.0, SLIDE.1) as u32;
         self
@@ -283,6 +306,8 @@ mod tests {
         assert_eq!(Settings { opacity: 100, glass: 100, ..s.clone() }.tint(), 0xE6_1A_12_10);
         assert_eq!(Settings { opacity: 75, ..s.clone() }.tint(), 0x93_1A_12_10);
         assert!(s.win_key && s.void_action == "none");
+        assert!(s.fill, "square, side to side, like the Windows taskbar");
+        assert!(s.wheel && !s.show_awake && !s.show_desktops && s.custom_command.is_empty(), "extras start off");
     }
 
     #[test]
@@ -303,6 +328,8 @@ mod tests {
         assert!(s.apply("void_action", &json!("x".repeat(900))).is_some() && s.void_action.len() == 400);
         assert!(s.apply("void_action", &json!(3)).is_none());
         assert!(s.apply("win_key", &json!(false)).is_some() && !s.win_key);
+        assert!(s.apply("custom_seconds", &json!(0)).is_some() && s.custom_seconds == 2);
+        assert!(s.apply("custom_command", &json!(" git -C C:\\src branch --show-current ")).is_some() && s.custom_command.starts_with("git"));
         assert!(s.apply("nope", &json!(true)).is_none());
         let edited: Settings = serde_json::from_str(r#"{"glass":200,"hide_delay_ms":5,"slide_ms":5000}"#).unwrap();
         let edited = edited.clamped();

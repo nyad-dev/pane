@@ -162,7 +162,9 @@ body.no-network .st-network,
 body.no-volume .vol-wrap,
 body.no-battery .st-battery,
 body.no-date #date,
-body.no-clock #time {
+body.no-clock #time,
+body.no-awake #awake,
+body.no-desktops #desktops {
   display: none !important;
 }
 
@@ -1796,4 +1798,90 @@ body.settings::after {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* ---------- Extras (extras.ts): keep awake, desktop dots, the user's own widget. */
+.awake {
+  width: 32px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+}
+
+.awake svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: var(--text-dim);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.awake .steam {
+  opacity: 0;
+}
+
+/* On: lit in the accent, steaming. Still, not animated: it can stay on for hours, and a looping animation
+   would keep the page drawing the whole time (Pane stays at ~0 % CPU when idle). */
+.awake.on svg {
+  stroke: var(--accent);
+}
+
+.awake.on .steam {
+  opacity: 1;
+  transition: opacity 0.3s var(--ease);
+}
+
+.desktops {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+}
+
+.desk {
+  width: 14px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.desk::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--text-dim);
+  opacity: 0.6;
+  transition: width 0.2s var(--spring), background-color 0.2s var(--ease), opacity 0.2s var(--ease);
+}
+
+.desk.current {
+  width: 22px;
+}
+
+.desk.current::before {
+  width: 14px;
+  background: var(--text);
+  opacity: 1;
+}
+
+.custom {
+  height: 28px;
+  max-width: 260px;
+  padding: 0 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  background: var(--glass);
+  border-radius: 14px;
+}
+
+.custom.running {
+  opacity: 0.6;
 }

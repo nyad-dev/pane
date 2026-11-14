@@ -16,6 +16,7 @@ import { menuPage, type Settings } from "./menu";
 import { reorderPins } from "./reorder";
 import { arrangeElements } from "./arrange";
 import { settingsPage } from "./settings";
+import { mountExtras, wheelSteps } from "./extras";
 
 type Progress = { state: "normal" | "paused" | "error" | "indeterminate"; value: number };
 type WinItem = {
@@ -33,7 +34,7 @@ type Item = MenuItemOptions | PredefinedMenuItemOptions;
 /** Widget and element switches hide their part with a class on <body> (it keeps updating, it's just not shown). */
 const WIDGETS = [
   "media", "claude", "codex", "usage", "weather", "docker",
-  "start", "tray", "network", "volume", "battery", "clock", "date",
+  "start", "tray", "network", "volume", "battery", "clock", "date", "awake", "desktops",
 ] as const;
 let settings: Settings | null = null;
 let onSettings = () => {};
@@ -347,6 +348,18 @@ function barPage() {
     if (previewOpen) invoke("hide_preview");
   };
   $("apps").addEventListener("click", closePreview);
+  // Scroll on an app icon: step through that app's windows (the next one comes to the front).
+  const overApp = (e: WheelEvent) => apps.find((a) => a.id === (e.target as HTMLElement).closest<HTMLElement>(".app")?.dataset.id);
+  wheelSteps(
+    $("apps"),
+    (e) => (settings?.wheel ?? true) && !!overApp(e)?.windows.length,
+    (dir, e) => {
+      const wins = overApp(e)?.windows ?? [];
+      const i = wins.findIndex((w) => w.active);
+      const next = wins[i < 0 ? (dir > 0 ? 0 : wins.length - 1) : (i + dir + wins.length) % wins.length];
+      if (next && !next.active) invoke("focus_window", { hwnd: next.hwnd });
+    },
+  );
 
   // --- Tray: promoted icons on the bar, the rest behind the ^ arrow.
   const showTray = (icons: TrayIcon[]) => {
@@ -438,6 +451,8 @@ function barPage() {
   invoke<WeatherReport | null>("get_weather").then((w) => renderWeather($("weather"), w));
   me.listen<WeatherReport | null>("weather", (e) => renderWeather($("weather"), e.payload));
   $("weather").addEventListener("click", () => invoke("open_widgets"));
+
+  mountExtras(() => settings?.wheel ?? true);
 
   invoke<Status>("get_status").then((s) => renderStatus($("status"), s));
   me.listen<Status>("status", (e) => renderStatus($("status"), e.payload));

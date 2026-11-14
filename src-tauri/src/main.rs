@@ -6,6 +6,7 @@ mod apps;
 mod claude;
 mod codex;
 mod colors;
+mod extras;
 mod docker;
 mod http;
 mod media;
@@ -27,7 +28,9 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, RunEven
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_global_shortcut::ShortcutState;
 use windows::Win32::Foundation::{HWND, RECT};
-use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_CONTROL, VK_ESCAPE, VK_LWIN, VK_SHIFT};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    VIRTUAL_KEY, VK_CONTROL, VK_ESCAPE, VK_LEFT, VK_LWIN, VK_RIGHT, VK_SHIFT, VK_VOLUME_DOWN, VK_VOLUME_UP,
+};
 
 /// The floating bar keeps this far (logical px) from the screen edges...
 const GAP: f64 = 6.0;
@@ -708,6 +711,102 @@ fn status_loop(app: AppHandle) {
             std::thread::sleep(Duration::from_secs(2));
         }
     });
+}
+
+/// Scroll on the volume icon: one volume key press (2 %), so Windows shows its own volume flyout too; the icon
+/// follows at once instead of with the next 2 s status check.
+#[tauri::command]
+async fn volume_step(app: AppHandle, up: bool) {
+    win::press(&[if up { VK_VOLUME_UP } else { VK_VOLUME_DOWN }]);
+    std::thread::sleep(Duration::from_millis(30));
+    let _ = app.emit("status", status::read());
+}
+
+#[tauri::command]
+fn set_awake(app: AppHandle, on: bool) {
+    extras::set_awake(on);
+    let _ = app.emit("awake", extras::awake());
+}
+
+#[tauri::command]
+fn get_awake() -> bool {
+    extras::awake()
+}
+
+#[tauri::command]
+async fn get_desktops() -> extras::Desktops {
+    extras::desktops()
+}
+
+/// A click on a desktop dot: Windows' own Ctrl+Win+Left/Right, as often as it takes (there is no documented
+/// way to switch to a desktop directly).
+#[tauri::command]
+async fn go_to_desktop(index: usize) {
+    let now = extras::desktops();
+    let steps = extras::steps(now.current, index.min(now.count - 1));
+    for _ in 0..steps.unsigned_abs() {
+        win::press(&[VK_CONTROL, VK_LWIN, if steps > 0 { VK_RIGHT } else { VK_LEFT }]);
+        std::thread::sleep(Duration::from_millis(40));
+    }
+}
+
+/// Sends the desktops to the bars whenever Explorer records a change (a registry event, no polling).
+fn desktops_loop(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut last = extras::desktops();
+        loop {
+            extras::wait_for_desktop_change();
+            let now = extras::desktops();
+            if now != last {
+                let _ = app.emit("desktops", &now);
+                last = now;
+            }
+        }
+    });
+}
+
+/// The user's own widget: its last output (None: no command set).
+static CUSTOM: Mutex<Option<String>> = Mutex::new(None);
+/// A click on the widget asks for a fresh run.
+static CUSTOM_NOW: AtomicBool = AtomicBool::new(false);
+
+/// Runs the user's command every `custom_seconds` (and when it changes or is clicked) and sends its first
+/// line to the bars. Wakes once a second to look; runs nothing while no command is set.
+fn custom_loop(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut ran: Option<(String, Instant)> = None;
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+            let s = settings::get();
+            let command = if SHOWN.load(SeqCst) { s.custom_command.clone() } else { String::new() };
+            if command.is_empty() {
+                if lock(&CUSTOM).take().is_some() {
+                    let _ = app.emit("custom", None::<String>);
+                }
+                ran = None;
+                continue;
+            }
+            let due = CUSTOM_NOW.swap(false, SeqCst)
+                || ran.as_ref().is_none_or(|(c, at)| *c != command || at.elapsed() >= Duration::from_secs(s.custom_seconds as u64));
+            if !due {
+                continue;
+            }
+            let out = extras::run_custom(&command);
+            ran = Some((command, Instant::now()));
+            *lock(&CUSTOM) = Some(out.clone());
+            let _ = app.emit("custom", Some(out));
+        }
+    });
+}
+
+#[tauri::command]
+fn get_custom() -> Option<String> {
+    lock(&CUSTOM).clone()
+}
+
+#[tauri::command]
+fn refresh_custom() {
+    CUSTOM_NOW.store(true, SeqCst);
 }
 
 #[tauri::command]
@@ -1452,6 +1551,13 @@ fn main() {
             open_task_manager,
             void_action,
             open_terminal,
+            volume_step,
+            set_awake,
+            get_awake,
+            get_desktops,
+            go_to_desktop,
+            get_custom,
+            refresh_custom,
             get_tray,
             tray_click,
             open_overflow,
@@ -1501,6 +1607,8 @@ fn main() {
             set_shown(&handle, true);
             watch_loop(handle.clone());
             status_loop(handle.clone());
+            desktops_loop(handle.clone());
+            custom_loop(handle.clone());
             weather_loop(handle.clone());
             usage_loop(handle.clone());
             claude_loop(handle.clone());

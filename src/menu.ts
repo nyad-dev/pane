@@ -37,6 +37,13 @@ export type Settings = {
   win_key: boolean;
   /** Double-click on an empty part of the bar: "none", "terminal", "explorer", "taskmgr", "desktop" or a program. */
   void_action: string;
+  /** Scroll on the volume icon / an app icon. */
+  wheel: boolean;
+  show_awake: boolean;
+  show_desktops: boolean;
+  /** The user's own widget: a command and how often it runs (empty: off). */
+  custom_command: string;
+  custom_seconds: number;
   hide_delay_ms: number;
   slide_ms: number;
   size: "small" | "normal" | "large";
@@ -165,6 +172,8 @@ export async function menuPage() {
       flip("show_battery", "Battery"),
       flip("show_clock", "Time"),
       flip("show_date", "Date"),
+      flip("show_awake", "Keep-awake button"),
+      flip("show_desktops", "Virtual desktops"),
     ];
     const PAGES: Record<Page, () => Entry[]> = {
       main: () => mainPage(),

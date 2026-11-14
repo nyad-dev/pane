@@ -28,7 +28,27 @@ function toggle(key: Switch, text: string) {
   return el("label", { className: "row" }, el("span", {}, text), input);
 }
 
-type NumKey = "glass" | "opacity" | "hide_delay_ms" | "slide_ms";
+type NumKey = "glass" | "opacity" | "hide_delay_ms" | "slide_ms" | "custom_seconds";
+
+/** The user's own widget: a command whose first line shows on the bar (settings.rs `custom_command`). */
+function customWidget() {
+  const input = el("input", { type: "text", className: "text", id: "s-custom", placeholder: "e.g. git -C C:\\code\\app branch --show-current", spellcheck: false });
+  input.onchange = () => set("custom_command", input.value.trim());
+  updates.push((s) => {
+    if (document.activeElement !== input) input.value = s.custom_command;
+  });
+  return el(
+    "div",
+    {},
+    el("div", { className: "row" }, el("label", { htmlFor: "s-custom" }, "Command"), input),
+    el(
+      "div",
+      { className: "row" },
+      el("span", { className: "note" }, "Runs hidden in your user folder; its first line shows on the bar. Click it on the bar to run it now. Empty: off."),
+    ),
+    slider("custom_seconds", "Runs every", 2, 600, 1, (v) => (v < 60 ? `${v} s` : `${Math.floor(v / 60)} min${v % 60 ? ` ${v % 60} s` : ""}`)),
+  );
+}
 
 /** What a double-click on an empty part of the bar does (settings.rs `void_action`); "other" is a program. */
 function voidAction() {
@@ -229,6 +249,13 @@ export async function settingsPage() {
         toggle("show_clock", "Time"),
         toggle("show_date", "Date"),
       ),
+      group(
+        "Extras",
+        toggle("wheel", "Scroll on the volume icon to change it, on an app to step through its windows"),
+        toggle("show_awake", "Keep-awake button (the PC and screen don't sleep while it's on)"),
+        toggle("show_desktops", "Virtual desktops (click a dot to switch, or scroll)"),
+      ),
+      group("Your own widget", customWidget()),
       group("Memory", toggle("low_memory", "Low memory mode (no GPU, applies after restart)")),
       group(
         "Windows",
