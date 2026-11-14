@@ -31,6 +31,12 @@ export type Settings = {
   element_order: string[];
   /** Glass lightness 0 (dark) ..= 100 (light), 50 = the original look. */
   glass: number;
+  /** Glass opacity 0 (clear) ..= 100 (nearly solid), 50 = the original look. */
+  opacity: number;
+  /** Auto-hide: the bar comes up while the Start menu is open. */
+  win_key: boolean;
+  /** Double-click on an empty part of the bar: "none", "terminal", "explorer", "taskmgr", "desktop" or a program. */
+  void_action: string;
   hide_delay_ms: number;
   slide_ms: number;
   size: "small" | "normal" | "large";
@@ -168,6 +174,9 @@ export async function menuPage() {
       elements: elementsPage,
     };
     const mainPage = (): Entry[] => [
+      { text: "Open terminal", run: () => invoke("open_terminal") },
+      { text: "Task Manager", run: () => invoke("open_task_manager") },
+      "-",
       { text: "Settings", run: () => go("settings"), stay: true, more: true },
       update,
       "-",

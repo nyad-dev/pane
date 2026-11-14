@@ -64,7 +64,11 @@ Pane puts a bar on **every monitor**, each showing that monitor's windows, and g
 
 **Rearrange the bar** by dragging: pinned apps, the widgets on the left, and system load, tray, status icons and clock on the right each move along their side, like icons on the Windows taskbar. `Alt+Shift+←/→` moves a focused one.
 
-**Auto-hide** floats the bar over your apps and slides it away; touch the bottom edge to bring it back. It stays up while a menu or preview is open.
+**Auto-hide** floats the bar over your apps and slides it away; touch the bottom edge to bring it back. It stays up while a menu or preview is open. Pressing the Windows key brings it up too, for as long as Start is open.
+
+**Glass** can be made lighter or darker and clearer or more solid in the settings. With **Match the colour of apps**, each part of the bar takes the colour of the app right above it; a small window only colours the part it touches.
+
+**Double-click the empty bar** to open a terminal, File Explorer, Task Manager, the desktop or an app of your choice (settings). The right-click menu has **Open terminal** and **Task Manager**.
 
 ## Turning it off
 

@@ -58,6 +58,14 @@ pub struct Settings {
     /// How light the glass is: 0 dark ..= 100 light, 50 is Pane's original look. Darker adds acrylic tint
     /// (`tint`), lighter removes it and the pages add a white sheen (main.ts `applyLook`).
     pub glass: u8,
+    /// How see-through the glass is: 0 clear ..= 100 nearly solid, 50 is Pane's original look. Scales how much
+    /// of the blur the acrylic tint covers (`tint`); the app-colour slab follows it in CSS (main.ts `applyLook`).
+    pub opacity: u8,
+    /// Auto-hide: the bar comes up while the Start menu or Search is open (pressing the Windows key).
+    pub win_key: bool,
+    /// What a double-click on an empty part of the bar does: "none", "terminal", "explorer", "taskmgr",
+    /// "desktop", or any other text is run as a program (a path or a command line, main.rs `void_action`).
+    pub void_action: String,
     /// Auto-hide: how long after the mouse left the bar it slides away (ms).
     pub hide_delay_ms: u32,
     /// Auto-hide: how long the slide takes (ms).
@@ -86,6 +94,8 @@ impl Size {
 }
 
 const GLASS_MAX: f64 = 100.0;
+/// A program path or command line fits; longer is a mistake.
+const VOID_MAX: usize = 400;
 const HIDE_DELAY: (f64, f64) = (100.0, 3000.0);
 const SLIDE: (f64, f64) = (0.0, 600.0);
 
@@ -118,6 +128,9 @@ impl Default for Settings {
             pin_order: Vec::new(),
             element_order: Vec::new(),
             glass: 50,
+            opacity: 50,
+            win_key: true,
+            void_action: "none".into(),
             hide_delay_ms: 700,
             // With the overshoot and settle (main.rs `slide`); 120 ms was a plain slide.
             slide_ms: 260,
@@ -125,6 +138,9 @@ impl Default for Settings {
         }
     }
 }
+
+/// The most the acrylic tint covers at full opacity (~90 %: a trace of the blur still shows).
+const SOLID: u32 = 0xE6;
 
 impl Settings {
     fn switch(&mut self, key: &str) -> Option<&mut bool> {
@@ -152,6 +168,7 @@ impl Settings {
             "volume_media" => &mut self.volume_media,
             "autostart_set" => &mut self.autostart_set,
             "admin_warned" => &mut self.admin_warned,
+            "win_key" => &mut self.win_key,
             _ => return None,
         })
     }
@@ -165,6 +182,8 @@ impl Settings {
         let num = |(lo, hi): (f64, f64)| value.as_f64().map(|n| n.round().clamp(lo, hi));
         match key {
             "glass" => self.glass = num((0.0, GLASS_MAX))? as u8,
+            "opacity" => self.opacity = num((0.0, GLASS_MAX))? as u8,
+            "void_action" => self.void_action = value.as_str()?.trim().chars().take(VOID_MAX).collect(),
             "hide_delay_ms" => self.hide_delay_ms = num(HIDE_DELAY)? as u32,
             "slide_ms" => self.slide_ms = num(SLIDE)? as u32,
             "size" => self.size = Size::deserialize(value).ok()?,
@@ -176,16 +195,21 @@ impl Settings {
     /// A hand-edited file gets the same limits as the settings window.
     fn clamped(mut self) -> Self {
         self.glass = self.glass.min(GLASS_MAX as u8);
+        self.opacity = self.opacity.min(GLASS_MAX as u8);
+        self.void_action = self.void_action.chars().take(VOID_MAX).collect();
         self.hide_delay_ms = (self.hide_delay_ms as f64).clamp(HIDE_DELAY.0, HIDE_DELAY.1) as u32;
         self.slide_ms = (self.slide_ms as f64).clamp(SLIDE.0, SLIDE.1) as u32;
         self
     }
 
-    /// Acrylic tint (0xAABBGGRR) for the glass lightness: 50 is the original 0x40_1A_12_10 (dark blue-grey over
-    /// ~25 % of the blur); towards 0 it covers up to 75 %, towards 100 it fades out.
+    /// Acrylic tint (0xAABBGGRR) for the glass lightness and opacity: at 50 / 50 the original 0x40_1A_12_10 (dark
+    /// blue-grey over ~25 % of the blur). Lightness: towards 0 it covers up to 75 %, towards 100 it fades out.
+    /// Opacity then scales that: towards 0 down to none (only the blur: clear glass), towards 100 up to ~90 %.
     pub fn tint(&self) -> u32 {
         let light = self.glass.min(100) as u32;
         let alpha = if light <= 50 { 0x40 + (50 - light) * 0x80 / 50 } else { 0x40 * (100 - light) / 50 };
+        let o = self.opacity.min(100) as u32;
+        let alpha = if o <= 50 { alpha * o / 50 } else { alpha + (SOLID - alpha) * (o - 50) / 50 };
         alpha << 24 | 0x1A_12_10
     }
 }
@@ -252,7 +276,13 @@ mod tests {
         assert_eq!(s.tint(), 0x40_1A_12_10);
         assert_eq!(s.size.height(), 48.0);
         assert_eq!(Settings { glass: 0, ..s.clone() }.tint(), 0xC0_1A_12_10);
-        assert_eq!(Settings { glass: 100, ..s }.tint(), 0x00_1A_12_10);
+        assert_eq!(Settings { glass: 100, ..s.clone() }.tint(), 0x00_1A_12_10);
+        // Opacity: clear glass is the bare blur, solid covers ~90 %, whatever the lightness.
+        assert_eq!(Settings { opacity: 0, ..s.clone() }.tint(), 0x00_1A_12_10);
+        assert_eq!(Settings { opacity: 100, ..s.clone() }.tint(), 0xE6_1A_12_10);
+        assert_eq!(Settings { opacity: 100, glass: 100, ..s.clone() }.tint(), 0xE6_1A_12_10);
+        assert_eq!(Settings { opacity: 75, ..s.clone() }.tint(), 0x93_1A_12_10);
+        assert!(s.win_key && s.void_action == "none");
     }
 
     #[test]
@@ -268,6 +298,11 @@ mod tests {
         assert!(s.apply("autohide", &json!(true)).is_some() && s.autohide);
         assert!(s.apply("autohide", &json!(1)).is_none());
         assert!(s.apply("glass", &json!("light")).is_none());
+        assert!(s.apply("opacity", &json!(140)).is_some() && s.opacity == 100);
+        assert!(s.apply("void_action", &json!("  terminal ")).is_some() && s.void_action == "terminal");
+        assert!(s.apply("void_action", &json!("x".repeat(900))).is_some() && s.void_action.len() == 400);
+        assert!(s.apply("void_action", &json!(3)).is_none());
+        assert!(s.apply("win_key", &json!(false)).is_some() && !s.win_key);
         assert!(s.apply("nope", &json!(true)).is_none());
         let edited: Settings = serde_json::from_str(r#"{"glass":200,"hide_delay_ms":5,"slide_ms":5000}"#).unwrap();
         let edited = edited.clamped();

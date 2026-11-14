@@ -58,6 +58,10 @@ function applyLook(s: Settings) {
   // Lighter: a white sheen over the glass. Darker: only the app-colour floor's slab needs a shade (no acrylic under it).
   root.setProperty("--wash", String((Math.max(0, s.glass - 50) / 50) * 0.2));
   root.setProperty("--shade", String((Math.max(0, 50 - s.glass) / 50) * 0.4));
+  // Opacity (Rust scales the acrylic tint): the app-colour slab, which has no acrylic, gets clearer or more solid.
+  const opacity = s.opacity ?? 50;
+  root.setProperty("--frost", String(Math.min(1, opacity / 50)));
+  root.setProperty("--solid", String((Math.max(0, opacity - 50) / 50) * 0.85));
   root.setProperty("--bar-zoom", String(ZOOM[s.size] ?? 1));
 }
 
@@ -428,7 +432,7 @@ function barPage() {
   // --- Settings (right-click menu) and the adaptive colour of the apps above the bar.
   invoke<Settings>("get_settings").then(applySettings);
   me.listen<Settings>("settings", (e) => applySettings(e.payload));
-  me.listen<[number, number, number][] | null>("tint", (e) => applyTint(settings?.adaptive_color || settings?.blend ? e.payload : null));
+  me.listen<([number, number, number] | null)[] | null>("tint", (e) => applyTint(settings?.adaptive_color || settings?.blend ? e.payload : null));
 
   // --- Weather under the time; a click opens the Windows Widgets board with the full forecast.
   invoke<WeatherReport | null>("get_weather").then((w) => renderWeather($("weather"), w));
@@ -470,6 +474,14 @@ function barPage() {
     const text = pill.textContent;
     pill.textContent = "Updating…";
     await invoke("install_update").catch(() => (pill.textContent = text));
+  });
+
+  // --- Double-click on an empty part of the bar: what the settings say (a terminal, an app, the desktop, …).
+  document.addEventListener("dblclick", (e) => {
+    if (reorder.dragging() || arrange?.dragging()) return;
+    const target = e.target as HTMLElement;
+    if (target.closest("button, input, a, .app, [data-move], .tray, .media")) return;
+    invoke("void_action");
   });
 
   // --- Right-click: app menu on an app icon, Pane menu (own popup, menu.ts) everywhere else (tray icons handle their own).

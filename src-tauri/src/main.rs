@@ -487,6 +487,13 @@ fn autohide_loop(app: AppHandle) {
         let Some((x, y)) = win::cursor().filter(|_| on) else { continue };
         let preview_open = preview::is_open();
         let settings = settings::get();
+        // Pressing the Windows key: the Start menu (or Search) is open, and the bar of its monitor comes up and
+        // stays while it is, like Windows' own auto-hidden taskbar.
+        let start = settings.win_key.then(win::start_menu).flatten();
+        let start_on = |m: RECT| start.is_some_and(|r| {
+            let (cx, cy) = ((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+            cx >= m.left && cx < m.right && cy >= m.top && cy < m.bottom
+        });
         let delay = Duration::from_millis(settings.hide_delay_ms as u64);
         let mut changes = Vec::new();
         for bar in bars(&app).iter_mut() {
@@ -494,7 +501,7 @@ fn autohide_loop(app: AppHandle) {
             let inside = x >= m.left && x < m.right && y >= m.top && y < m.bottom;
             let over = inside && y >= bar.layout(&settings).0.top;
             if bar.concealed {
-                if inside && y >= m.bottom - 2 && !bar.fullscreen {
+                if (inside && y >= m.bottom - 2 || start_on(m)) && !bar.fullscreen {
                     (bar.concealed, bar.left_at) = (false, None);
                     changes.push((bar.label.clone(), bar.window(&settings), m.bottom, true));
                 }
@@ -506,7 +513,7 @@ fn autohide_loop(app: AppHandle) {
             // count; a menu elsewhere on the monitor doesn't keep the bar up.
             let strip = bar.layout(&settings).0;
             let near_bar = RECT { top: strip.top - (48.0 * bar.scale) as i32, ..m };
-            let hold = over || bar.fullscreen || preview_open || bar_has_popup(&bar.label) || win::menu_open_in(near_bar);
+            let hold = over || start_on(m) || bar.fullscreen || preview_open || bar_has_popup(&bar.label) || win::menu_open_in(near_bar);
             if hold {
                 bar.left_at = None;
             } else if bar.left_at.get_or_insert_with(Instant::now).elapsed() > delay {
@@ -520,34 +527,62 @@ fn autohide_loop(app: AppHandle) {
     });
 }
 
-/// Adaptive colour and the app-colour floor: every 0.5 s, the colours of the app sitting on each bar
-/// (colors.rs), sent to that bar once they held still, or at once for another app or a bar that is slid away
-/// (so it comes up in the right colours). Only while one of the settings is on; not behind fullscreen apps.
+/// Adaptive colour and the app-colour floor: the colours of the apps sitting on each bar (colors.rs), sent to
+/// that bar. Which app is where is checked every 0.1 s (cheap); the screen is read (~20 ms) at once when that
+/// changes and twice more while the new app finishes drawing, else every 0.75 s for colour changes inside an
+/// app, which are only shown once they held still (a video never flickers). Only while one of the settings is
+/// on; not behind fullscreen apps.
 fn tint_loop(app: AppHandle) {
+    /// Colour bands across the bar (tint.ts and style.css have as many).
+    const BANDS: usize = 16;
+    /// After the apps on the bar changed, readings this long count as settled at once (the new app may still
+    /// be drawing, or animating in, on the first one).
+    const FRESH: Duration = Duration::from_millis(600);
+    #[derive(Default)]
+    struct State {
+        steady: colors::Steady,
+        layout: colors::Layout,
+        changed: Option<Instant>,
+        read: Option<Instant>,
+    }
     std::thread::spawn(move || {
-        let mut steady: HashMap<String, colors::Steady> = HashMap::new();
+        let mut bars_state: HashMap<String, State> = HashMap::new();
         let mut was_on = false;
         loop {
-            std::thread::sleep(Duration::from_millis(500));
+            std::thread::sleep(Duration::from_millis(100));
             let s = settings::get();
             let on = SHOWN.load(SeqCst) && (s.adaptive_color || s.blend);
             if !on {
                 if was_on {
-                    let _ = app.emit("tint", None::<Vec<[u8; 3]>>);
-                    steady.clear();
+                    let _ = app.emit("tint", None::<colors::Bands>);
+                    bars_state.clear();
                 }
                 was_on = false;
                 continue;
             }
             was_on = true;
-            let targets: Vec<(String, RECT, RECT, bool)> = bars(&app)
+            let targets: Vec<(String, RECT, bool)> = bars(&app)
                 .iter()
                 .filter(|b| !b.fullscreen)
-                .map(|b| (b.label.clone(), b.layout(&s).0, b.monitor, b.concealed))
+                .map(|b| (b.label.clone(), b.layout(&s).0, b.concealed))
                 .collect();
-            for (label, strip, monitor, away) in targets {
-                let (window, now) = colors::app_floor(monitor, strip, 8);
-                if let Some(show) = steady.entry(label.clone()).or_default().feed(window, now, away) {
+            for (label, strip, away) in targets {
+                let st = bars_state.entry(label.clone()).or_default();
+                let layout = colors::layout(strip);
+                if layout != st.layout {
+                    st.layout = layout;
+                    st.changed = Some(Instant::now());
+                }
+                let since = |t: Option<Instant>| t.map_or(Duration::MAX, |t| t.elapsed());
+                let fresh = since(st.changed) < FRESH;
+                // At most every 0.2 s (a window being dragged changes the layout on every check).
+                let due = since(st.read) >= Duration::from_millis(if fresh { 200 } else { 750 });
+                if !due {
+                    continue;
+                }
+                st.read = Some(Instant::now());
+                let now = colors::read(strip, &st.layout, BANDS);
+                if let Some(show) = st.steady.feed(st.layout.ids(), now, away || fresh) {
                     let _ = app.emit_to(label.as_str(), "tint", show);
                 }
             }
@@ -981,7 +1016,7 @@ async fn set_setting(app: AppHandle, key: String, value: serde_json::Value) -> O
     if matches!(key.as_str(), "autohide" | "fill" | "blend" | "size") && SHOWN.load(SeqCst) {
         on_main(&app, |h| place_bars(h, true));
     }
-    if key == "glass" {
+    if key == "glass" || key == "opacity" {
         let tint = now.tint();
         on_main(&app, move |h| {
             // Bars and open popups; the settings window has its own (Mica) backdrop.
@@ -1020,6 +1055,25 @@ async fn set_element_order(app: AppHandle, order: Vec<String>) {
 #[tauri::command]
 async fn open_volume_mixer() {
     win::open("ms-settings:apps-volume");
+}
+
+/// A double-click on an empty part of the bar: what the user chose in the settings (`void_action`).
+#[tauri::command]
+fn void_action() {
+    let action = settings::get().void_action;
+    match action.as_str() {
+        "" | "none" => {}
+        "terminal" => win::open_terminal(),
+        "explorer" => win::open("explorer.exe"),
+        "taskmgr" => open_task_manager(),
+        "desktop" => win::press(&[VK_LWIN, VIRTUAL_KEY(b'D' as u16)]),
+        command => win::run_user_command(command),
+    }
+}
+
+#[tauri::command]
+fn open_terminal() {
+    win::open_terminal();
 }
 
 #[tauri::command]
@@ -1396,6 +1450,8 @@ fn main() {
             claude_icon,
             open_claude_usage,
             open_task_manager,
+            void_action,
+            open_terminal,
             get_tray,
             tray_click,
             open_overflow,
